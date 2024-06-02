@@ -24,8 +24,8 @@ with open(csv_filename, mode='a', newline='') as csv_file:
         header = ['label'] + [f'pixel_{i}' for i in range(28 * 28)]
         csv_writer.writerow(header)
     
-    # Lặp lại 10 lần
-    for i in range(20):
+    # Lặp lại 50 lần
+    for i in range(100):
         # Gửi yêu cầu và nhận JSON phản hồi
         response = requests.get(url)
         data = response.json()

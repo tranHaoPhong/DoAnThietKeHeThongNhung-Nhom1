@@ -5,22 +5,30 @@
 #include "camera_pin.h"
 
 #include <TensorFlowLite_ESP32.h>
-#include "HandModel.h"
+
 #include "tensorflow/lite/micro/all_ops_resolver.h"
 #include "tensorflow/lite/micro/micro_error_reporter.h"
 #include "tensorflow/lite/micro/micro_interpreter.h"
+#include "tensorflow/lite/micro/system_setup.h"
 #include "tensorflow/lite/schema/schema_generated.h"
-// #include "tensorflow/lite/version.h"
 
-// Chỉnh sửa kích thước của vùng nhớ dành cho TensorFlow Lite
-constexpr int kTensorArenaSize = 60 * 1024;
-uint8_t tensor_arena[kTensorArenaSize];
+//load model
+#include "HandModel.h"
 
-int RESIZE_WIDTH = 28; // Di chuyển khai báo của biến
-int RESIZE_HEIGHT = 28; // Di chuyển khai báo của biến
+// Globals, used for compatibility with Arduino-style sketches.
+namespace {
+tflite::ErrorReporter* error_reporter = nullptr;
+const tflite::Model* model = nullptr;
+tflite::MicroInterpreter* interpreter = nullptr;
+ TfLiteTensor* model_input = nullptr;
+TfLiteTensor* model_output = nullptr;
 
-// Khai báo biến interpreter là biến toàn cục
-static tflite::MicroInterpreter* interpreter_ptr;
+// Create an area of memory to use for input, output, and other TensorFlow
+  // arrays. You'll need to adjust this by combiling, running, and looking
+  // for errors.
+  constexpr int kTensorArenaSize = 60 * 1024;
+  uint8_t tensor_arena[kTensorArenaSize];
+} // namespace
 
 bool setup_camera(framesize_t frameSize) {
     camera_config_t config;
@@ -56,64 +64,57 @@ bool setup_camera(framesize_t frameSize) {
     return esp_camera_init(&config) == ESP_OK;
 }
 
-void handle_captureAI() {
-    static bool model_allocated = false; // Biến đánh dấu cho việc cấp phát bộ nhớ cho mô hình
+void setup() {
+  Serial.begin(115200);
+  // Set up logging (will report to Serial, even within TFLite functions)
+  static tflite::MicroErrorReporter micro_error_reporter;
+  error_reporter = &micro_error_reporter;
+  // Map the model into a usable data structure
+  model = tflite::GetModel(HandModel);
+  if (model->version() != TFLITE_SCHEMA_VERSION) {
+    TF_LITE_REPORT_ERROR(error_reporter,
+                         "Model provided is schema version %d not equal "
+                         "to supported version %d.",
+                         model->version(), TFLITE_SCHEMA_VERSION);
+    return;
+  }
+  // This pulls in all the operation implementations we need.
+  // NOLINTNEXTLINE(runtime-global-variables)
+  static tflite::AllOpsResolver resolver;
 
-    // Set up logging
-    static tflite::MicroErrorReporter micro_error_reporter;
-    tflite::ErrorReporter* error_reporter = &micro_error_reporter;
+  // Build an interpreter to run the model with.
+  static tflite::MicroInterpreter static_interpreter(
+      model, resolver, tensor_arena, kTensorArenaSize, error_reporter);
+  interpreter = &static_interpreter;
 
-    // Map the model into a usable data structure
-    const tflite::Model* model = tflite::GetModel(HandModel);
-    if (model->version() != TFLITE_SCHEMA_VERSION) {
-        error_reporter->Report("Model provided is schema version %d not equal to supported version %d.",
-                               model->version(), TFLITE_SCHEMA_VERSION);
-        return;
-    }
+  // Allocate memory from the tensor_arena for the model's tensors.
+  TfLiteStatus allocate_status = interpreter->AllocateTensors();
+  if (allocate_status != kTfLiteOk) {
+    TF_LITE_REPORT_ERROR(error_reporter, "AllocateTensors() failed");
+    return;
+  }
 
-    // Chỉ cấp phát bộ nhớ cho mô hình nếu chưa được thực hiện trước đó
-    if (!model_allocated) {
-        // This pulls in all the operation implementations we need.
-        static tflite::AllOpsResolver resolver;
+  // Assign model input and output buffers (tensors) to pointers
+  model_input = interpreter->input(0);
+  model_output = interpreter->output(0);
 
-        // Build an interpreter to run the model with
-        static tflite::MicroInterpreter interpreter(
-            model, resolver, tensor_arena, kTensorArenaSize, error_reporter);
+  if (!setup_camera(FRAMESIZE_QQVGA)) {
+    Serial.println("Camera init failed");
+    return;
+  }
+}
 
-        interpreter_ptr = &interpreter;
-
-        // Allocate memory from the tensor_arena for the model's tensors
-        TfLiteStatus allocate_status = interpreter.AllocateTensors();
-        if (allocate_status != kTfLiteOk) {
-            error_reporter->Report("AllocateTensors() failed");
-            return;
-        }
-
-        model_allocated = true; // Đánh dấu rằng bộ nhớ đã được cấp phát cho mô hình
-    }
-
-    // Get information about the input tensor
-    TfLiteTensor* input = interpreter_ptr->input(0);
-    if (input->dims->size != 4 || input->dims->data[0] != 1 ||
-        input->dims->data[1] != 28 || input->dims->data[2] != 28 ||
-        input->dims->data[3] != 1) {
-        error_reporter->Report("Bad input tensor parameters in model");
-        return;
-    }
-
-    ///////////////////////////////////////////////////////////////////////////////////////
+void handle_capture()
+{
     camera_fb_t * frame = esp_camera_fb_get();
     if (!frame) {
         Serial.println("Camera capture failed");
         return;
     }
-    // Kiểm tra kích thước của frame trước khi xử lý
-    // if (frame->width > RESIZE_WIDTH || frame->height > RESIZE_HEIGHT) {
-    //     Serial.println("Frame size too large for resizing");
-    //     esp_camera_fb_return(frame);
-    //     return;
-    // }
 
+    int RESIZE_WIDTH = 28; // Di chuyển khai báo của biến
+    int RESIZE_HEIGHT = 28; // Di chuyển khai báo của biến
+    
     // Calculate scale factors for resizing
     int scale_x = frame->width / RESIZE_WIDTH;
     int scale_y = frame->height / RESIZE_HEIGHT;
@@ -135,29 +136,27 @@ void handle_captureAI() {
 
             // Calculate average pixel value
             uint8_t avg_pixel = sum / (scale_x * scale_y);
-            input->data.int8[x*y] = avg_pixel;
+            model_input->data.f[x*y] = avg_pixel;
         }
     }
 
     esp_camera_fb_return(frame);
-    ////////////////////////////////////////////////////////////////////////////////////////
+}
+void loop() {
+  handle_capture();
 
-    // Run inference
-    TfLiteStatus invoke_status = interpreter_ptr->Invoke();
-    if (invoke_status != kTfLiteOk) {
-        error_reporter->Report("Invoke failed");
-        return;
-    }
+  // Run inference
+  TfLiteStatus invoke_status = interpreter->Invoke();
+  if (invoke_status != kTfLiteOk) {
+    error_reporter->Report("Invoke failed");
+  }
 
-    // Get the output from the inference
-    TfLiteTensor* output = interpreter_ptr->output(0);
+  int predict = 0;
+  int max = -999;
 
-    int predict = 0;
-    int max = -999;
-
-    // Print the output to the Serial
-    for (int i = 0; i < output->dims->data[1]; i++) {
-      float value = output->data.int8[i];
+  // Print the output to the Serial
+    for (int i = 0; i < model_output->dims->data[1]; i++) {
+      float value = model_output->data.f[i];
       if (value > max){
         max = value;
         predict = i;
@@ -166,17 +165,5 @@ void handle_captureAI() {
     Serial.print("Predict = ");
     Serial.print(predict);
     Serial.println("");
-}
-
-void setup(){
-  Serial.begin(115200);
-  if (!setup_camera(FRAMESIZE_QQVGA)) {
-    Serial.println("Camera init failed");
-    return;
-  }
-}
-
-void loop() {
-  handle_captureAI();
-  delay(5000);
+  
 }

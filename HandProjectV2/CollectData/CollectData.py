@@ -10,7 +10,7 @@ url = 'http://192.168.4.1/capture'
 
 # Tên file CSV để lưu dữ liệu ảnh
 csv_filename = 'image_data.csv'
-label = 0  # Thay thế 'label_value' bằng giá trị label thực tế của bạn
+label = 2  # Thay thế 'label_value' bằng giá trị label thực tế của bạn
 
 # Kiểm tra xem file CSV đã tồn tại chưa
 file_exists = os.path.isfile(csv_filename)
@@ -21,7 +21,7 @@ with open(csv_filename, mode='a', newline='') as csv_file:
     
     # Ghi header vào file CSV nếu file chưa tồn tại
     if not file_exists:
-        header = ['label'] + [f'pixel_{i}' for i in range(32 * 24)]
+        header = ['label'] + [f'pixel_{i}' for i in range(28 * 28)]
         csv_writer.writerow(header)
     
     # Lặp lại 10 lần
@@ -36,7 +36,7 @@ with open(csv_filename, mode='a', newline='') as csv_file:
 
             # Chuyển đổi dữ liệu ảnh thành numpy array
             image_array = np.array(image_data, dtype=np.uint8)
-            image_array = image_array.reshape((24, 32))
+            image_array = image_array.reshape((28, 28))
 
         
             # Hiển thị ảnh

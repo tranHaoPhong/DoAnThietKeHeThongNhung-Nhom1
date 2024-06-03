@@ -10,14 +10,10 @@
 #include "tensorflow/lite/micro/micro_error_reporter.h"
 #include "tensorflow/lite/micro/micro_interpreter.h"
 #include "tensorflow/lite/schema/schema_generated.h"
-// #include "tensorflow/lite/version.h"
 
 // Chỉnh sửa kích thước của vùng nhớ dành cho TensorFlow Lite
 constexpr int kTensorArenaSize = 60 * 1024;
 uint8_t tensor_arena[kTensorArenaSize];
-
-int RESIZE_WIDTH = 28; // Di chuyển khai báo của biến
-int RESIZE_HEIGHT = 28; // Di chuyển khai báo của biến
 
 // Khai báo biến interpreter là biến toàn cục
 static tflite::MicroInterpreter* interpreter_ptr;
@@ -47,11 +43,6 @@ bool setup_camera(framesize_t frameSize) {
     config.frame_size = frameSize;
     config.jpeg_quality = 12;
     config.fb_count = 1;
-
-    // disable white balance and white balance gain
-    // sensor_t * sensor = esp_camera_sensor_get();
-    // sensor->set_whitebal(sensor, 0);       // 0 = disable , 1 = enable
-    // sensor->set_awb_gain(sensor, 0);       // 0 = disable , 1 = enable
 
     return esp_camera_init(&config) == ESP_OK;
 }
@@ -101,24 +92,20 @@ void handle_captureAI() {
         return;
     }
 
-    ///////////////////////////////////////////////////////////////////////////////////////
     camera_fb_t * frame = esp_camera_fb_get();
     if (!frame) {
         Serial.println("Camera capture failed");
         return;
     }
-    // Kiểm tra kích thước của frame trước khi xử lý
-    // if (frame->width > RESIZE_WIDTH || frame->height > RESIZE_HEIGHT) {
-    //     Serial.println("Frame size too large for resizing");
-    //     esp_camera_fb_return(frame);
-    //     return;
-    // }
+
+    int RESIZE_WIDTH = 28; // Di chuyển khai báo của biến
+    int RESIZE_HEIGHT = 28; // Di chuyển khai báo của biến
 
     // Calculate scale factors for resizing
     int scale_x = frame->width / RESIZE_WIDTH;
     int scale_y = frame->height / RESIZE_HEIGHT;
 
-    // Print resized pixel values
+    // Resize and normalize pixel values
     for (int y = 0; y < RESIZE_HEIGHT; y++) {
         for (int x = 0; x < RESIZE_WIDTH; x++) {
             int orig_x = x * scale_x;
@@ -133,14 +120,14 @@ void handle_captureAI() {
                 }
             }
 
-            // Calculate average pixel value
+            // Calculate average pixel value and normalize
             uint8_t avg_pixel = sum / (scale_x * scale_y);
-            input->data.int8[x*y] = avg_pixel;
+            float normalized_pixel = avg_pixel / 255.0f;
+            input->data.int8[y * RESIZE_WIDTH + x] = (int8_t)(normalized_pixel * 255 - 128);
         }
     }
 
     esp_camera_fb_return(frame);
-    ////////////////////////////////////////////////////////////////////////////////////////
 
     // Run inference
     TfLiteStatus invoke_status = interpreter_ptr->Invoke();
@@ -153,15 +140,15 @@ void handle_captureAI() {
     TfLiteTensor* output = interpreter_ptr->output(0);
 
     int predict = 0;
-    int max = -999;
+    int max = -128;  // Adjusted for int8 range
 
     // Print the output to the Serial
     for (int i = 0; i < output->dims->data[1]; i++) {
-      float value = output->data.int8[i];
-      if (value > max){
-        max = value;
-        predict = i;
-      }
+        int8_t value = output->data.int8[i];
+        if (value > max) {
+            max = value;
+            predict = i;
+        }
     }
     Serial.print("Predict = ");
     Serial.print(predict);
@@ -169,14 +156,14 @@ void handle_captureAI() {
 }
 
 void setup(){
-  Serial.begin(115200);
-  if (!setup_camera(FRAMESIZE_QQVGA)) {
-    Serial.println("Camera init failed");
-    return;
-  }
+    Serial.begin(115200);
+    if (!setup_camera(FRAMESIZE_QQVGA)) {
+        Serial.println("Camera init failed");
+        return;
+    }
 }
 
 void loop() {
-  handle_captureAI();
-  delay(2000);
+    handle_captureAI();
+    delay(2000);
 }

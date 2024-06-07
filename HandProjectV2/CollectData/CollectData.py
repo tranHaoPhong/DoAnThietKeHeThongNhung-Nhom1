@@ -10,7 +10,7 @@ url = 'http://192.168.4.1/capture'
 
 # Tên file CSV để lưu dữ liệu ảnh
 csv_filename = 'image_data.csv'
-label = 2  # Thay thế 'label_value' bằng giá trị label thực tế của bạn
+label = 1  # Thay thế 'label_value' bằng giá trị label thực tế của bạn
 
 # Kiểm tra xem file CSV đã tồn tại chưa
 file_exists = os.path.isfile(csv_filename)
@@ -25,7 +25,7 @@ with open(csv_filename, mode='a', newline='') as csv_file:
         csv_writer.writerow(header)
     
     # Lặp lại 50 lần
-    for i in range(100):
+    for i in range(10):
         # Gửi yêu cầu và nhận JSON phản hồi
         response = requests.get(url)
         data = response.json()

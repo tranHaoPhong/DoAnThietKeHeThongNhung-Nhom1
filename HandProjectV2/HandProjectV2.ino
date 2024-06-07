@@ -97,6 +97,13 @@ void handle_captureAI() {
         Serial.println("Camera capture failed");
         return;
     }
+    esp_camera_fb_return(frame);
+
+    frame = esp_camera_fb_get();
+    if (!frame) {
+        Serial.println("Camera capture failed");
+        return;
+    }
 
     int RESIZE_WIDTH = 28; // Di chuyển khai báo của biến
     int RESIZE_HEIGHT = 28; // Di chuyển khai báo của biến
